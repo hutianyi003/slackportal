@@ -162,7 +162,7 @@ function searchMessage(web, channel_id, text, start_ts, end_ts) {
   });
 }
 
-function createPortal(local_web, local_rtm, remote_web, local_channel_id, remote_channel_id) {
+function createPortal(local_web, local_rtm, remote_web, local_channel_id, remote_channel_id, remote_bot) {
   var reactionHandler = event => {
     if (event.item.channel !== local_channel_id)
       return;
@@ -256,9 +256,12 @@ function createPortal(local_web, local_rtm, remote_web, local_channel_id, remote
           if (event.files === undefined) {
           }
           else { // there are files
-            for (file in event.files) {
+            for (file of event.files) {
+              if (file.user === config.remote_bot_user || file.user === config.local_bot_user) {
+                continue;
+              }
               (async () => {
-                const result = await remote_web.files.upload({
+                const result = await remote_bot.files.upload({
                   file: request.get(
                     file.url_private,
                     {
@@ -267,7 +270,7 @@ function createPortal(local_web, local_rtm, remote_web, local_channel_id, remote
                       },
                     }),
                   channels: remote_channel_id,
-                  initial_comment: `*${getNameFromUser(getUser(local_web,file.user))}*\n${event.text}`,
+                  initial_comment: `*${getNameFromUser(await getUser(local_web,file.user))}*\n${event.text}`,
                 })
                 log.info(`File uploaded:  ${result.file.id}`);
               })();
@@ -315,8 +318,20 @@ function createPortal(local_web, local_rtm, remote_web, local_channel_id, remote
         }
         break;
       case 'bot_message':
-        // Do nothing to prevent infinite messages sent back and forth
-        log.info('ignored bot message to prevent messages sent back and forth');
+        // check bot user id to avoid infinte transfer
+        if (event.bot_id === config.remote_bot_id || event.bot_id === config.local_bot_id) {
+          log.info('ignored bot message to prevent messages sent back and forth');
+          break;
+        }
+        log.info(`forwarding to remote......`);
+        remote_web.chat.postMessage({
+          channel: remote_channel_id,
+          text: event.text,
+          as_user: false,
+          link_names: true,
+          username: event.username,
+          blocks: event.blocks,
+        });
         break;
       default:
         log.warn(`unknown event.subtype ${event.subtype}, ignored`);
@@ -327,6 +342,7 @@ function createPortal(local_web, local_rtm, remote_web, local_channel_id, remote
 async function main() {
   log.info(`local web client connecting...`);
   const local_web = new WebClient(config.local_oauth_token);
+  const local_bot = new WebClient(config.local_bot_token);
   log.info(`local rtm client connecting...`);
   const local_rtm = new RTMClient(config.local_bot_token);
   log.info(`local rtm start...`);
@@ -334,6 +350,7 @@ async function main() {
 
   log.info(`remote web client connecting...`);
   const remote_web = new WebClient(config.remote_oauth_token);
+  const remote_bot = new WebClient(config.remote_bot_token);
   log.info(`remote rtm client connecting...`);
   const remote_rtm = new RTMClient(config.remote_bot_token);
   log.info(`remote rtm start...`);
@@ -353,8 +370,8 @@ async function main() {
   remote_web.cached_users = {};
   //TODO: cached local messages, so thread reply can be more efficient
   //var local_messages = {};
-  createPortal(local_web, local_rtm, remote_web, local_channel_id, remote_channel_id);
-  createPortal(remote_web, remote_rtm, local_web, remote_channel_id, local_channel_id);
+  createPortal(local_web, local_rtm, remote_web, local_channel_id, remote_channel_id, remote_bot);
+  createPortal(remote_web, remote_rtm, local_web, remote_channel_id, local_channel_id, local_bot);
 }
 
 main();
