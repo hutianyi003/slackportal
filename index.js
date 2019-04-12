@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const {RTMClient, WebClient} = require('@slack/client');
 const config = require('./config');
+const request = require('request')
 
 const START_TS_DIFF = config.START_TS_DIFF;
 const END_TS_DIFF = config.END_TS_DIFF;
@@ -252,6 +253,27 @@ function createPortal(local_web, local_rtm, remote_web, local_channel_id, remote
       case undefined:
         if (event.thread_ts === undefined) { // normal message
           log.info(`forwarding normal message ${event.text}......`);
+          if (event.files === undefined) {
+          }
+          else { // there are files
+            for (file in event.files) {
+              (async () => {
+                const result = await remote_web.files.upload({
+                  file: request.get(
+                    file.url_private,
+                    {
+                      'headers': {
+                        'Authorization': 'Bearer ' + config.local_bot_token
+                      },
+                    }),
+                  channels: remote_channel_id,
+                  initial_comment: `*${getNameFromUser(getUser(local_web,file.user))}*\n${event.text}`,
+                })
+                log.info(`File uploaded:  ${result.file.id}`);
+              })();
+            }
+            break;
+          }
           Promise.all([
             getUser(local_web, event.user),
             preprocessUserMentions(local_web, event.text)
